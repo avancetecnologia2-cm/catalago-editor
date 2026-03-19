@@ -42,14 +42,40 @@ function clampFontSize(value: number) {
 }
 
 export default function Editor({ params }: EditorProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const fabricRef = useRef<FabricCanvas | null>(null)
+  const sceneSizeRef = useRef({ width: 800, height: 1000 })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [selectedType, setSelectedType] = useState<string | null>(null)
   const [fillColor, setFillColor] = useState(DEFAULT_TEXT_COLOR)
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
   const [fontWeight, setFontWeight] = useState<'normal' | 'bold'>('normal')
+  const [zoomPercent, setZoomPercent] = useState(100)
+
+  const fitCanvasToViewport = useCallback(() => {
+    const canvas = fabricRef.current
+    const container = containerRef.current
+    const sceneWidth = sceneSizeRef.current.width
+    const sceneHeight = sceneSizeRef.current.height
+
+    if (!canvas || !container || !sceneWidth || !sceneHeight) {
+      return
+    }
+
+    const containerWidth = Math.max(container.clientWidth - 16, 320)
+    const availableHeight = Math.max(window.innerHeight - 280, 320)
+    const scale = Math.min(1, containerWidth / sceneWidth, availableHeight / sceneHeight)
+
+    canvas.setViewportTransform([scale, 0, 0, scale, 0, 0])
+    canvas.setDimensions({
+      width: Math.max(Math.round(sceneWidth * scale), 1),
+      height: Math.max(Math.round(sceneHeight * scale), 1),
+    })
+    canvas.requestRenderAll()
+    setZoomPercent(Math.round(scale * 100))
+  }, [])
 
   const syncSelectionState = useCallback(() => {
     const canvas = fabricRef.current
@@ -310,6 +336,10 @@ export default function Editor({ params }: EditorProps) {
 
         const imageWidth = backgroundImage.width || 800
         const imageHeight = backgroundImage.height || 1000
+        sceneSizeRef.current = {
+          width: imageWidth,
+          height: imageHeight,
+        }
 
         canvas.setDimensions({ width: imageWidth, height: imageHeight })
         backgroundImage.set({
@@ -319,6 +349,8 @@ export default function Editor({ params }: EditorProps) {
           evented: false,
         })
         canvas.backgroundImage = backgroundImage
+      } else {
+        sceneSizeRef.current = { width: 800, height: 1000 }
       }
 
       let restoredStoredState = false
@@ -372,6 +404,7 @@ export default function Editor({ params }: EditorProps) {
       })
 
       canvas.requestRenderAll()
+      fitCanvasToViewport()
       syncSelectionState()
       setLoading(false)
     }
@@ -385,7 +418,20 @@ export default function Editor({ params }: EditorProps) {
         fabricRef.current = null
       }
     }
-  }, [attachCanvasListeners, loadStoredCanvasState, params.id, syncSelectionState])
+  }, [attachCanvasListeners, fitCanvasToViewport, loadStoredCanvasState, params.id, syncSelectionState])
+
+  useEffect(() => {
+    fitCanvasToViewport()
+
+    const handleResize = () => {
+      fitCanvasToViewport()
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [fitCanvasToViewport])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -462,6 +508,20 @@ export default function Editor({ params }: EditorProps) {
     <div className="space-y-4">
       <div className="rounded-xl border bg-white p-4 shadow-sm">
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (window.history.length > 1) {
+                window.history.back()
+                return
+              }
+
+              window.location.assign('/')
+            }}
+            className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded hover:bg-zinc-50"
+          >
+            Cancelar edicao
+          </button>
           <button
             onClick={() => void addPrice()}
             disabled={loading}
@@ -585,6 +645,10 @@ export default function Editor({ params }: EditorProps) {
           <div className="text-sm text-zinc-500">
             {selectedType ? `Selecionado: ${selectedType}` : 'Selecione um item para editar estilo'}
           </div>
+
+          <div className="text-sm font-medium text-zinc-500">
+            Visualizacao: {zoomPercent}%
+          </div>
         </div>
       </div>
 
@@ -595,7 +659,7 @@ export default function Editor({ params }: EditorProps) {
 
       {loading && <p className="text-sm text-gray-500">Carregando pagina...</p>}
 
-      <div className="overflow-auto border rounded bg-white p-2">
+      <div ref={containerRef} className="overflow-auto border rounded bg-white p-2">
         <canvas ref={canvasRef} className="border rounded shadow-sm" />
       </div>
     </div>
