@@ -9,7 +9,6 @@ import type {
 } from 'fabric'
 import { supabase } from '@/lib/supabase'
 import {
-  buildEditorStateFilePath,
   extractPricePayload,
 } from '@/lib/catalog-utils'
 
@@ -234,14 +233,16 @@ export default function Editor({ params }: EditorProps) {
   )
 
   const loadStoredCanvasState = useCallback(async (canvas: FabricCanvas) => {
-    const statePath = buildEditorStateFilePath(params.id)
-    const { data, error } = await supabase.storage.from('catalogos').download(statePath)
+    const response = await fetch(`/api/editor-state/${params.id}`, {
+      method: 'GET',
+      cache: 'no-store',
+    })
 
-    if (error || !data) {
+    if (!response.ok) {
       return false
     }
 
-    const rawState = (await data.text()) || '{}'
+    const rawState = (await response.text()) || '{}'
     const parsedState = JSON.parse(rawState) as StoredCanvasState
     const serializedState = {
       objects: Array.isArray(parsedState.objects) ? parsedState.objects : [],
@@ -296,8 +297,9 @@ export default function Editor({ params }: EditorProps) {
       fabricRef.current = canvas
 
       const pageData = pageResponse.data
+      let backgroundImage: InstanceType<typeof FabricImage> | null = null
       if (pageData?.image_url) {
-        const backgroundImage = await FabricImage.fromURL(pageData.image_url, {
+        backgroundImage = await FabricImage.fromURL(pageData.image_url, {
           crossOrigin: 'anonymous',
         })
 
@@ -340,6 +342,16 @@ export default function Editor({ params }: EditorProps) {
 
           canvas.add(text)
         }
+      }
+
+      if (backgroundImage) {
+        backgroundImage.set({
+          left: 0,
+          top: 0,
+          selectable: false,
+          evented: false,
+        })
+        canvas.backgroundImage = backgroundImage
       }
 
       canvas.on('mouse:dblclick', (event: TPointerEventInfo<TPointerEvent>) => {
@@ -426,20 +438,19 @@ export default function Editor({ params }: EditorProps) {
       objects: Array.isArray(serializedCanvas.objects) ? serializedCanvas.objects : [],
     }
 
-    const stateBlob = new Blob([JSON.stringify(storedState)], {
-      type: 'application/json',
+    const response = await fetch(`/api/editor-state/${params.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(storedState),
     })
 
-    const { error: stateError } = await supabase.storage
-      .from('catalogos')
-      .upload(buildEditorStateFilePath(params.id), stateBlob, {
-        upsert: true,
-        contentType: 'application/json',
-      })
-
-    if (stateError) {
+    if (!response.ok) {
+      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
+      const message = errorPayload?.error || 'Falha ao salvar layout completo'
       setSaving(false)
-      alert('Os precos foram salvos, mas falhou ao salvar o layout completo: ' + stateError.message)
+      alert('Os precos foram salvos, mas falhou ao salvar o layout completo: ' + message)
       return
     }
 
