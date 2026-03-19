@@ -46,6 +46,10 @@ export default function Editor({ params }: EditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const fabricRef = useRef<FabricCanvas | null>(null)
   const sceneSizeRef = useRef({ width: 800, height: 1000 })
+  const zoomRef = useRef(1)
+  const panRef = useRef({ x: 0, y: 0 })
+  const isPanningRef = useRef(false)
+  const lastPointerRef = useRef({ x: 0, y: 0 })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [selectedType, setSelectedType] = useState<string | null>(null)
@@ -54,28 +58,78 @@ export default function Editor({ params }: EditorProps) {
   const [fontWeight, setFontWeight] = useState<'normal' | 'bold'>('normal')
   const [zoomPercent, setZoomPercent] = useState(100)
 
-  const fitCanvasToViewport = useCallback(() => {
+  const applyViewport = useCallback(() => {
     const canvas = fabricRef.current
     const container = containerRef.current
-    const sceneWidth = sceneSizeRef.current.width
-    const sceneHeight = sceneSizeRef.current.height
+    const { width: sceneWidth, height: sceneHeight } = sceneSizeRef.current
 
     if (!canvas || !container || !sceneWidth || !sceneHeight) {
       return
     }
 
     const containerWidth = Math.max(container.clientWidth - 16, 320)
-    const availableHeight = Math.max(window.innerHeight - 280, 320)
-    const scale = Math.min(1, containerWidth / sceneWidth, availableHeight / sceneHeight)
+    const containerHeight = Math.max(Math.min(window.innerHeight - 280, 900), 420)
+    const { x, y } = panRef.current
+    const zoom = zoomRef.current
 
-    canvas.setViewportTransform([scale, 0, 0, scale, 0, 0])
     canvas.setDimensions({
-      width: Math.max(Math.round(sceneWidth * scale), 1),
-      height: Math.max(Math.round(sceneHeight * scale), 1),
+      width: containerWidth,
+      height: containerHeight,
     })
+    canvas.setViewportTransform([zoom, 0, 0, zoom, x, y])
     canvas.requestRenderAll()
-    setZoomPercent(Math.round(scale * 100))
+    setZoomPercent(Math.round(zoom * 100))
   }, [])
+
+  const fitCanvasToViewport = useCallback(() => {
+    const container = containerRef.current
+    const { width: sceneWidth, height: sceneHeight } = sceneSizeRef.current
+
+    if (!container || !sceneWidth || !sceneHeight) {
+      return
+    }
+
+    const containerWidth = Math.max(container.clientWidth - 16, 320)
+    const containerHeight = Math.max(Math.min(window.innerHeight - 280, 900), 420)
+    const zoom = Math.min(containerWidth / sceneWidth, containerHeight / sceneHeight)
+
+    zoomRef.current = Math.min(Math.max(zoom, 0.1), 4)
+    panRef.current = {
+      x: (containerWidth - sceneWidth * zoomRef.current) / 2,
+      y: (containerHeight - sceneHeight * zoomRef.current) / 2,
+    }
+
+    applyViewport()
+  }, [applyViewport])
+
+  const setZoom = useCallback(
+    (nextZoom: number) => {
+      const container = containerRef.current
+      const { width: sceneWidth, height: sceneHeight } = sceneSizeRef.current
+
+      if (!container || !sceneWidth || !sceneHeight) {
+        return
+      }
+
+      const containerWidth = Math.max(container.clientWidth - 16, 320)
+      const containerHeight = Math.max(Math.min(window.innerHeight - 280, 900), 420)
+      const centerX = containerWidth / 2
+      const centerY = containerHeight / 2
+      const previousZoom = zoomRef.current
+      const clampedZoom = Math.min(Math.max(nextZoom, 0.1), 4)
+      const worldCenterX = (centerX - panRef.current.x) / previousZoom
+      const worldCenterY = (centerY - panRef.current.y) / previousZoom
+
+      zoomRef.current = clampedZoom
+      panRef.current = {
+        x: centerX - worldCenterX * clampedZoom,
+        y: centerY - worldCenterY * clampedZoom,
+      }
+
+      applyViewport()
+    },
+    [applyViewport]
+  )
 
   const syncSelectionState = useCallback(() => {
     const canvas = fabricRef.current
@@ -122,8 +176,48 @@ export default function Editor({ params }: EditorProps) {
       canvas.on('object:modified', syncSelectionState)
       canvas.on('object:added', syncSelectionState)
       canvas.on('object:removed', syncSelectionState)
+      canvas.on('mouse:down', (event: TPointerEventInfo<TPointerEvent>) => {
+        if (event.target) {
+          return
+        }
+
+        isPanningRef.current = true
+        lastPointerRef.current = {
+          x: event.e.clientX,
+          y: event.e.clientY,
+        }
+      })
+      canvas.on('mouse:move', (event: TPointerEventInfo<TPointerEvent>) => {
+        if (!isPanningRef.current) {
+          return
+        }
+
+        const deltaX = event.e.clientX - lastPointerRef.current.x
+        const deltaY = event.e.clientY - lastPointerRef.current.y
+        lastPointerRef.current = {
+          x: event.e.clientX,
+          y: event.e.clientY,
+        }
+
+        panRef.current = {
+          x: panRef.current.x + deltaX,
+          y: panRef.current.y + deltaY,
+        }
+
+        applyViewport()
+      })
+      canvas.on('mouse:up', () => {
+        isPanningRef.current = false
+      })
+      canvas.on('mouse:wheel', (event) => {
+        const delta = event.e.deltaY
+        const zoomFactor = delta > 0 ? 0.9 : 1.1
+        setZoom(zoomRef.current * zoomFactor)
+        event.e.preventDefault()
+        event.e.stopPropagation()
+      })
     },
-    [syncSelectionState]
+    [applyViewport, setZoom, syncSelectionState]
   )
 
   const addTextbox = useCallback(
@@ -578,6 +672,27 @@ export default function Editor({ params }: EditorProps) {
           >
             {saving ? 'Salvando...' : 'Salvar edicao'}
           </button>
+          <button
+            type="button"
+            onClick={() => setZoom(zoomRef.current * 1.15)}
+            className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded hover:bg-zinc-50"
+          >
+            Ampliar
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(zoomRef.current / 1.15)}
+            className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded hover:bg-zinc-50"
+          >
+            Reduzir
+          </button>
+          <button
+            type="button"
+            onClick={() => fitCanvasToViewport()}
+            className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded hover:bg-zinc-50"
+          >
+            Ajustar na tela
+          </button>
         </div>
 
         <div className="mt-4 flex flex-wrap items-end gap-4">
@@ -654,7 +769,8 @@ export default function Editor({ params }: EditorProps) {
 
       <p className="text-sm text-gray-500">
         Dica: use duplo clique para criar um preco novo. O salvamento agora guarda o layout completo
-        do canvas e tambem mantem a tabela de precos atualizada.
+        do canvas e tambem mantem a tabela de precos atualizada. Arraste o fundo para mover a
+        imagem e use a roda do mouse ou os botoes para ampliar e reduzir.
       </p>
 
       {loading && <p className="text-sm text-gray-500">Carregando pagina...</p>}
