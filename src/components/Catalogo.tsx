@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import html2canvas from 'html2canvas'
+import Editor from '@/components/Editor'
 import { supabase } from '@/lib/supabase'
 import { getPdfImagePlacement } from '@/lib/catalog-utils'
 
@@ -38,6 +39,7 @@ export default function Catalogo({ params }: CatalogoProps) {
   const [loading, setLoading] = useState(true)
   const [showImage, setShowImage] = useState(true)
   const [exporting, setExporting] = useState<'png' | 'pdf' | null>(null)
+  const [editingPageId, setEditingPageId] = useState<string | null>(null)
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const loadData = useCallback(async () => {
@@ -197,6 +199,15 @@ export default function Catalogo({ params }: CatalogoProps) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {pages[0] && (
+                <button
+                  type="button"
+                  onClick={() => setEditingPageId(pages[0].id)}
+                  className="px-3 py-2 bg-amber-100 text-amber-800 rounded text-sm font-medium hover:bg-amber-200"
+                >
+                  Editar paginas
+                </button>
+              )}
               <button
                 onClick={() => setShowImage((current) => !current)}
                 className={`px-3 py-2 rounded text-sm font-medium transition ${
@@ -240,13 +251,22 @@ export default function Catalogo({ params }: CatalogoProps) {
           <div key={page.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
             <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
               <span className="text-sm font-medium text-gray-600">Pagina {index + 1}</span>
-              <button
-                onClick={() => void exportPageAsPNG(page)}
-                disabled={exporting !== null}
-                className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-50"
-              >
-                Exportar esta pagina
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPageId(page.id)}
+                  className="px-2 py-1 text-xs bg-amber-500 text-white rounded hover:bg-amber-600"
+                >
+                  Editar esta pagina
+                </button>
+                <button
+                  onClick={() => void exportPageAsPNG(page)}
+                  disabled={exporting !== null}
+                  className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-50"
+                >
+                  Exportar esta pagina
+                </button>
+              </div>
             </div>
 
             <div
@@ -308,6 +328,101 @@ export default function Catalogo({ params }: CatalogoProps) {
           </div>
         ))}
       </main>
+
+      {editingPageId && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+          <button
+            type="button"
+            aria-label="Fechar editor"
+            className="flex-1 cursor-default"
+            onClick={() => setEditingPageId(null)}
+          />
+          <aside className="h-full w-full overflow-y-auto bg-white shadow-2xl sm:max-w-[720px]">
+            <div className="sticky top-0 z-10 border-b bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div>
+                  <h2 className="font-semibold text-zinc-900">Editar pagina</h2>
+                  <p className="text-sm text-zinc-500">
+                    Ajuste textos, formas e posicoes sem sair do visualizador.
+                  </p>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                  <Link
+                    href={`/edit/${editingPageId}`}
+                    className="rounded bg-blue-100 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-200"
+                  >
+                    Tela cheia
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setEditingPageId(null)}
+                    className="rounded bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4">
+              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900">Paginas do catalogo</h3>
+                    <p className="text-xs text-zinc-500">
+                      Selecione rapidamente a pagina que voce quer ajustar.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
+                    Ativa:{' '}
+                    {pages.findIndex((page) => page.id === editingPageId) >= 0
+                      ? `Pagina ${pages.findIndex((page) => page.id === editingPageId) + 1}`
+                      : 'Nenhuma'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {pages.map((page, index) => {
+                    const isActive = editingPageId === page.id
+
+                    return (
+                      <button
+                        key={page.id}
+                        type="button"
+                        onClick={() => setEditingPageId(page.id)}
+                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                          isActive
+                            ? 'border-amber-500 bg-amber-500 text-white shadow-sm'
+                            : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100'
+                        }`}
+                      >
+                        Pagina {index + 1}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200 bg-white p-2 sm:p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-zinc-900">
+                      {pages.findIndex((page) => page.id === editingPageId) >= 0
+                        ? `Editando pagina ${pages.findIndex((page) => page.id === editingPageId) + 1}`
+                        : 'Editor'}
+                    </h3>
+                    <p className="text-sm text-zinc-500">
+                      As alteracoes ficam salvas e podem ser exportadas depois.
+                    </p>
+                  </div>
+                </div>
+
+                <Editor params={{ id: editingPageId }} />
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
 
       <footer className="bg-white border-t mt-8 py-4">
         <div className="max-w-6xl mx-auto px-4 text-center text-sm text-gray-500">
