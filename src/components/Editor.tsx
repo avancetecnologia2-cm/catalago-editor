@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   Canvas as FabricCanvas,
+  FabricObject,
   TPointerEvent,
   TPointerEventInfo,
 } from 'fabric'
 import { supabase } from '@/lib/supabase'
-import { extractPricePayload } from '@/lib/catalog-utils'
+import {
+  buildEditorStateFilePath,
+  extractPricePayload,
+} from '@/lib/catalog-utils'
 
 interface EditorProps {
   params: {
@@ -26,29 +30,160 @@ interface PriceRecord {
   y: number
 }
 
+interface StoredCanvasState {
+  objects?: unknown[]
+}
+
+const DEFAULT_TEXT_COLOR = '#dc2626'
+const DEFAULT_SHAPE_COLOR = '#2563eb'
+const DEFAULT_FONT_SIZE = 20
+
+function clampFontSize(value: number) {
+  return Math.min(Math.max(value, 10), 96)
+}
+
 export default function Editor({ params }: EditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const fabricRef = useRef<FabricCanvas | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [selectedType, setSelectedType] = useState<string | null>(null)
+  const [fillColor, setFillColor] = useState(DEFAULT_TEXT_COLOR)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const [fontWeight, setFontWeight] = useState<'normal' | 'bold'>('normal')
+
+  const syncSelectionState = useCallback(() => {
+    const canvas = fabricRef.current
+    const activeObject = canvas?.getActiveObject()
+
+    if (!activeObject) {
+      setSelectedType(null)
+      setFillColor(DEFAULT_TEXT_COLOR)
+      setFontSize(DEFAULT_FONT_SIZE)
+      setFontWeight('normal')
+      return
+    }
+
+    setSelectedType(activeObject.type || 'objeto')
+
+    const currentFill =
+      typeof activeObject.get('fill') === 'string'
+        ? (activeObject.get('fill') as string)
+        : activeObject.type === 'line' && typeof activeObject.get('stroke') === 'string'
+          ? (activeObject.get('stroke') as string)
+          : activeObject.type === 'textbox'
+            ? DEFAULT_TEXT_COLOR
+            : DEFAULT_SHAPE_COLOR
+
+    setFillColor(currentFill)
+
+    if (activeObject.type === 'textbox') {
+      const currentFontSize = activeObject.get('fontSize')
+      const currentFontWeight = activeObject.get('fontWeight')
+      setFontSize(typeof currentFontSize === 'number' ? currentFontSize : DEFAULT_FONT_SIZE)
+      setFontWeight(currentFontWeight === 'bold' ? 'bold' : 'normal')
+      return
+    }
+
+    setFontSize(DEFAULT_FONT_SIZE)
+    setFontWeight('normal')
+  }, [])
+
+  const attachCanvasListeners = useCallback(
+    (canvas: FabricCanvas) => {
+      canvas.on('selection:created', syncSelectionState)
+      canvas.on('selection:updated', syncSelectionState)
+      canvas.on('selection:cleared', syncSelectionState)
+      canvas.on('object:modified', syncSelectionState)
+      canvas.on('object:added', syncSelectionState)
+      canvas.on('object:removed', syncSelectionState)
+    },
+    [syncSelectionState]
+  )
+
+  const addTextbox = useCallback(
+    async (text: string, options?: { left?: number; top?: number }) => {
+      if (!fabricRef.current) return
+
+      const { Textbox } = await import('fabric')
+      const canvas = fabricRef.current
+      const textbox = new Textbox(text, {
+        left: options?.left ?? 40,
+        top: options?.top ?? 40,
+        width: 180,
+        fill: DEFAULT_TEXT_COLOR,
+        fontSize: DEFAULT_FONT_SIZE,
+        fontWeight: 'normal',
+      })
+
+      canvas.add(textbox)
+      canvas.setActiveObject(textbox)
+      canvas.requestRenderAll()
+      syncSelectionState()
+    },
+    [syncSelectionState]
+  )
 
   const addPrice = useCallback(async () => {
+    await addTextbox('R$ 0,00')
+  }, [addTextbox])
+
+  const addText = useCallback(async () => {
+    await addTextbox('Novo texto')
+  }, [addTextbox])
+
+  const addRectangle = useCallback(async () => {
     if (!fabricRef.current) return
 
-    const { Textbox } = await import('fabric')
-    const canvas = fabricRef.current
-    const text = new Textbox('R$ 0,00', {
-      left: 40,
-      top: 40,
+    const { Rect } = await import('fabric')
+    const rectangle = new Rect({
+      left: 80,
+      top: 80,
       width: 180,
-      fill: '#dc2626',
-      fontSize: 20,
+      height: 90,
+      fill: DEFAULT_SHAPE_COLOR,
+      rx: 8,
+      ry: 8,
     })
 
-    canvas.add(text)
-    canvas.setActiveObject(text)
-    canvas.requestRenderAll()
-  }, [])
+    fabricRef.current.add(rectangle)
+    fabricRef.current.setActiveObject(rectangle)
+    fabricRef.current.requestRenderAll()
+    syncSelectionState()
+  }, [syncSelectionState])
+
+  const addCircle = useCallback(async () => {
+    if (!fabricRef.current) return
+
+    const { Circle } = await import('fabric')
+    const circle = new Circle({
+      left: 120,
+      top: 120,
+      radius: 50,
+      fill: DEFAULT_SHAPE_COLOR,
+    })
+
+    fabricRef.current.add(circle)
+    fabricRef.current.setActiveObject(circle)
+    fabricRef.current.requestRenderAll()
+    syncSelectionState()
+  }, [syncSelectionState])
+
+  const addLine = useCallback(async () => {
+    if (!fabricRef.current) return
+
+    const { Line } = await import('fabric')
+    const line = new Line([80, 80, 260, 80], {
+      stroke: DEFAULT_SHAPE_COLOR,
+      strokeWidth: 4,
+      fill: DEFAULT_SHAPE_COLOR,
+    })
+
+    fabricRef.current.add(line)
+    fabricRef.current.setActiveObject(line)
+    fabricRef.current.requestRenderAll()
+    syncSelectionState()
+  }, [syncSelectionState])
 
   const removeSelected = useCallback(() => {
     if (!fabricRef.current) return
@@ -58,8 +193,68 @@ export default function Editor({ params }: EditorProps) {
     if (!activeObject) return
 
     canvas.remove(activeObject)
+    canvas.discardActiveObject()
     canvas.requestRenderAll()
-  }, [])
+    syncSelectionState()
+  }, [syncSelectionState])
+
+  const duplicateSelected = useCallback(async () => {
+    const canvas = fabricRef.current
+    const activeObject = canvas?.getActiveObject()
+
+    if (!canvas || !activeObject) return
+
+    const clonedObject = await activeObject.clone()
+    clonedObject.set({
+      left: (activeObject.left || 0) + 24,
+      top: (activeObject.top || 0) + 24,
+    })
+
+    canvas.add(clonedObject)
+    canvas.setActiveObject(clonedObject)
+    canvas.requestRenderAll()
+    syncSelectionState()
+  }, [syncSelectionState])
+
+  const updateSelectedObject = useCallback(
+    (updater: (activeObject: FabricObject) => void) => {
+      const canvas = fabricRef.current
+      const activeObject = canvas?.getActiveObject()
+
+      if (!canvas || !activeObject) {
+        return
+      }
+
+      updater(activeObject)
+      activeObject.setCoords()
+      canvas.requestRenderAll()
+      syncSelectionState()
+    },
+    [syncSelectionState]
+  )
+
+  const loadStoredCanvasState = useCallback(async (canvas: FabricCanvas) => {
+    const statePath = buildEditorStateFilePath(params.id)
+    const { data, error } = await supabase.storage.from('catalogos').download(statePath)
+
+    if (error || !data) {
+      return false
+    }
+
+    const rawState = (await data.text()) || '{}'
+    const parsedState = JSON.parse(rawState) as StoredCanvasState
+    const serializedState = {
+      objects: Array.isArray(parsedState.objects) ? parsedState.objects : [],
+    }
+
+    const canvasWithLoader = canvas as FabricCanvas & {
+      loadFromJSON: (json: unknown) => Promise<unknown>
+    }
+
+    await canvasWithLoader.loadFromJSON(serializedState)
+    canvas.requestRenderAll()
+    return true
+  }, [params.id])
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -97,6 +292,7 @@ export default function Editor({ params }: EditorProps) {
         backgroundColor: '#f3f4f6',
       })
 
+      attachCanvasListeners(canvas)
       fabricRef.current = canvas
 
       const pageData = pageResponse.data
@@ -123,16 +319,27 @@ export default function Editor({ params }: EditorProps) {
         canvas.backgroundImage = backgroundImage
       }
 
-      for (const price of (pricesResponse.data || []) as PriceRecord[]) {
-        const text = new Textbox(price.text, {
-          left: price.x,
-          top: price.y,
-          width: 180,
-          fill: '#dc2626',
-          fontSize: 20,
-        })
+      let restoredStoredState = false
 
-        canvas.add(text)
+      try {
+        restoredStoredState = await loadStoredCanvasState(canvas)
+      } catch {
+        restoredStoredState = false
+      }
+
+      if (!restoredStoredState) {
+        for (const price of (pricesResponse.data || []) as PriceRecord[]) {
+          const text = new Textbox(price.text, {
+            left: price.x,
+            top: price.y,
+            width: 180,
+            fill: DEFAULT_TEXT_COLOR,
+            fontSize: DEFAULT_FONT_SIZE,
+            fontWeight: 'normal',
+          })
+
+          canvas.add(text)
+        }
       }
 
       canvas.on('mouse:dblclick', (event: TPointerEventInfo<TPointerEvent>) => {
@@ -141,16 +348,19 @@ export default function Editor({ params }: EditorProps) {
           left: pointer.x,
           top: pointer.y,
           width: 180,
-          fill: '#dc2626',
-          fontSize: 20,
+          fill: DEFAULT_TEXT_COLOR,
+          fontSize: DEFAULT_FONT_SIZE,
+          fontWeight: 'normal',
         })
 
         canvas.add(text)
         canvas.setActiveObject(text)
         canvas.requestRenderAll()
+        syncSelectionState()
       })
 
       canvas.requestRenderAll()
+      syncSelectionState()
       setLoading(false)
     }
 
@@ -163,12 +373,16 @@ export default function Editor({ params }: EditorProps) {
         fabricRef.current = null
       }
     }
-  }, [params.id])
+  }, [attachCanvasListeners, loadStoredCanvasState, params.id, syncSelectionState])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) {
+      if (
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable
+      ) {
         return
       }
 
@@ -188,7 +402,8 @@ export default function Editor({ params }: EditorProps) {
 
     setSaving(true)
 
-    const payload = extractPricePayload(params.id, fabricRef.current.getObjects())
+    const canvas = fabricRef.current
+    const payload = extractPricePayload(params.id, canvas.getObjects())
 
     const { error: deleteError } = await supabase.from('prices').delete().eq('page_id', params.id)
     if (deleteError) {
@@ -206,39 +421,165 @@ export default function Editor({ params }: EditorProps) {
       }
     }
 
+    const serializedCanvas = canvas.toJSON()
+    const storedState: StoredCanvasState = {
+      objects: Array.isArray(serializedCanvas.objects) ? serializedCanvas.objects : [],
+    }
+
+    const stateBlob = new Blob([JSON.stringify(storedState)], {
+      type: 'application/json',
+    })
+
+    const { error: stateError } = await supabase.storage
+      .from('catalogos')
+      .upload(buildEditorStateFilePath(params.id), stateBlob, {
+        upsert: true,
+        contentType: 'application/json',
+      })
+
+    if (stateError) {
+      setSaving(false)
+      alert('Os precos foram salvos, mas falhou ao salvar o layout completo: ' + stateError.message)
+      return
+    }
+
     setSaving(false)
-    alert('Precos salvos!')
+    alert('Edicao completa salva! Agora textos, formas e estilos voltam ao reabrir a pagina.')
   }, [params.id])
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => void addPrice()}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
-        >
-          Adicionar preco
-        </button>
-        <button
-          onClick={removeSelected}
-          disabled={loading}
-          className="px-4 py-2 bg-zinc-200 text-zinc-800 rounded hover:bg-zinc-300 disabled:opacity-50"
-        >
-          Remover selecionado
-        </button>
-        <button
-          onClick={() => void savePrices()}
-          disabled={loading || saving}
-          className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
-        >
-          {saving ? 'Salvando...' : 'Salvar precos'}
-        </button>
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => void addPrice()}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+          >
+            Adicionar preco
+          </button>
+          <button
+            onClick={() => void addText()}
+            disabled={loading}
+            className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 disabled:opacity-50"
+          >
+            Texto livre
+          </button>
+          <button
+            onClick={() => void addRectangle()}
+            disabled={loading}
+            className="px-4 py-2 bg-sky-500 text-white rounded hover:bg-sky-600 disabled:opacity-50"
+          >
+            Retangulo
+          </button>
+          <button
+            onClick={() => void addCircle()}
+            disabled={loading}
+            className="px-4 py-2 bg-fuchsia-500 text-white rounded hover:bg-fuchsia-600 disabled:opacity-50"
+          >
+            Circulo
+          </button>
+          <button
+            onClick={() => void addLine()}
+            disabled={loading}
+            className="px-4 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50"
+          >
+            Linha
+          </button>
+          <button
+            onClick={() => void duplicateSelected()}
+            disabled={loading || !selectedType}
+            className="px-4 py-2 bg-zinc-700 text-white rounded hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Duplicar
+          </button>
+          <button
+            onClick={removeSelected}
+            disabled={loading || !selectedType}
+            className="px-4 py-2 bg-zinc-200 text-zinc-800 rounded hover:bg-zinc-300 disabled:opacity-50"
+          >
+            Remover selecionado
+          </button>
+          <button
+            onClick={() => void savePrices()}
+            disabled={loading || saving}
+            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+          >
+            {saving ? 'Salvando...' : 'Salvar edicao'}
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-4">
+          <label className="flex flex-col gap-1 text-sm text-zinc-700">
+            Cor
+            <input
+              type="color"
+              value={fillColor}
+              disabled={!selectedType}
+              onChange={(event) => {
+                const nextColor = event.target.value
+                setFillColor(nextColor)
+                updateSelectedObject((activeObject) => {
+                  if (activeObject.type === 'line') {
+                    activeObject.set('stroke', nextColor)
+                    activeObject.set('fill', nextColor)
+                    return
+                  }
+
+                  activeObject.set('fill', nextColor)
+                })
+              }}
+              className="h-10 w-16 rounded border bg-white disabled:opacity-50"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-zinc-700">
+            Tamanho
+            <input
+              type="range"
+              min="10"
+              max="96"
+              step="1"
+              value={fontSize}
+              disabled={selectedType !== 'textbox'}
+              onChange={(event) => {
+                const nextSize = clampFontSize(Number(event.target.value))
+                setFontSize(nextSize)
+                updateSelectedObject((activeObject) => {
+                  if (activeObject.type === 'textbox') {
+                    activeObject.set('fontSize', nextSize)
+                  }
+                })
+              }}
+              className="w-40 disabled:opacity-50"
+            />
+          </label>
+
+          <button
+            onClick={() => {
+              const nextWeight = fontWeight === 'bold' ? 'normal' : 'bold'
+              setFontWeight(nextWeight)
+              updateSelectedObject((activeObject) => {
+                if (activeObject.type === 'textbox') {
+                  activeObject.set('fontWeight', nextWeight)
+                }
+              })
+            }}
+            disabled={selectedType !== 'textbox'}
+            className="px-4 py-2 bg-white border rounded hover:bg-zinc-50 disabled:opacity-50"
+          >
+            {fontWeight === 'bold' ? 'Texto normal' : 'Negrito'}
+          </button>
+
+          <div className="text-sm text-zinc-500">
+            {selectedType ? `Selecionado: ${selectedType}` : 'Selecione um item para editar estilo'}
+          </div>
+        </div>
       </div>
 
       <p className="text-sm text-gray-500">
-        Dica: use duplo clique para criar um preco novo e Delete/Backspace para remover o item
-        selecionado.
+        Dica: use duplo clique para criar um preco novo. O salvamento agora guarda o layout completo
+        do canvas e tambem mantem a tabela de precos atualizada.
       </p>
 
       {loading && <p className="text-sm text-gray-500">Carregando pagina...</p>}

@@ -8,6 +8,11 @@ import {
   createCatalogSlug,
   filterPagesByCatalog,
 } from '@/lib/catalog-utils'
+import {
+  convertPdfToImageFiles,
+  getPdfPageCount,
+  PDF_FILE_ACCEPT,
+} from '@/lib/pdf-client'
 
 interface Catalog {
   id: string
@@ -27,6 +32,8 @@ export default function Dashboard() {
   const [newCatalogName, setNewCatalogName] = useState('')
   const [selectedCatalog, setSelectedCatalog] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [uploadMode, setUploadMode] = useState<'image' | 'pdf'>('image')
+  const [pdfPageCount, setPdfPageCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [creatingCatalog, setCreatingCatalog] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -126,33 +133,49 @@ export default function Dashboard() {
     }
 
     setLoading(true)
-    const fileName = buildStorageFileName(file.name, Date.now())
 
-    const { error: uploadError } = await supabase.storage
-      .from('catalogos')
-      .upload(fileName, file)
+    try {
+      const filesToUpload =
+        uploadMode === 'pdf'
+          ? await convertPdfToImageFiles(file)
+          : [file]
 
-    if (uploadError) {
+      for (const currentFile of filesToUpload) {
+        const fileName = buildStorageFileName(currentFile.name, Date.now())
+
+        const { error: uploadError } = await supabase.storage
+          .from('catalogos')
+          .upload(fileName, currentFile)
+
+        if (uploadError) {
+          setLoading(false)
+          alert('Erro no upload: ' + uploadError.message)
+          return
+        }
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from('catalogos').getPublicUrl(fileName)
+
+        const { error: insertError } = await supabase.from('pages').insert({
+          catalog_id: selectedCatalog,
+          image_url: publicUrl,
+        })
+
+        if (insertError) {
+          setLoading(false)
+          alert('Erro ao salvar pagina: ' + insertError.message)
+          return
+        }
+      }
+    } catch (error) {
       setLoading(false)
-      alert('Erro no upload: ' + uploadError.message)
+      const message = error instanceof Error ? error.message : 'Falha ao processar o arquivo'
+      alert(uploadMode === 'pdf' ? `Erro ao processar PDF: ${message}` : message)
       return
     }
-
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('catalogos').getPublicUrl(fileName)
-
-    const { error: insertError } = await supabase.from('pages').insert({
-      catalog_id: selectedCatalog,
-      image_url: publicUrl,
-    })
 
     setLoading(false)
-
-    if (insertError) {
-      alert('Erro ao salvar pagina: ' + insertError.message)
-      return
-    }
 
     setFile(null)
     if (fileInputRef.current) {
@@ -160,7 +183,33 @@ export default function Dashboard() {
     }
 
     await loadPages()
-    alert('Pagina adicionada!')
+    alert(uploadMode === 'pdf' ? 'PDF enviado e paginas adicionadas!' : 'Pagina adicionada!')
+  }
+
+  const handleFileChange = async (nextFile: File | null) => {
+    setFile(nextFile)
+    setPdfPageCount(null)
+
+    if (!nextFile) {
+      return
+    }
+
+    if (uploadMode === 'pdf') {
+      if (nextFile.type !== 'application/pdf' && !nextFile.name.toLowerCase().endsWith('.pdf')) {
+        alert('Selecione um arquivo PDF valido')
+        setFile(null)
+        return
+      }
+
+      try {
+        const pageCount = await getPdfPageCount(nextFile)
+        setPdfPageCount(pageCount)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Falha ao ler o PDF'
+        alert(`Erro ao ler PDF: ${message}`)
+        setFile(null)
+      }
+    }
   }
 
   const getCatalogPages = (catalogId: string) => {
@@ -199,6 +248,44 @@ export default function Dashboard() {
       <div className="p-4 border rounded bg-white">
         <h2 className="text-xl font-semibold mb-4">Adicionar Pagina</h2>
         <div className="space-y-4">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setUploadMode('image')
+                setFile(null)
+                setPdfPageCount(null)
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = ''
+                }
+              }}
+              className={`px-4 py-2 rounded ${
+                uploadMode === 'image'
+                  ? 'bg-green-500 text-white'
+                  : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+              }`}
+            >
+              Imagem
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUploadMode('pdf')
+                setFile(null)
+                setPdfPageCount(null)
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = ''
+                }
+              }}
+              className={`px-4 py-2 rounded ${
+                uploadMode === 'pdf'
+                  ? 'bg-green-500 text-white'
+                  : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+              }`}
+            >
+              PDF multipagina
+            </button>
+          </div>
           <select
             value={selectedCatalog}
             onChange={(event) => setSelectedCatalog(event.target.value)}
@@ -214,16 +301,32 @@ export default function Dashboard() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
+            accept={uploadMode === 'image' ? 'image/*' : PDF_FILE_ACCEPT}
+            onChange={(event) => void handleFileChange(event.target.files?.[0] || null)}
             className="block w-full"
           />
+          <p className="text-sm text-gray-500">
+            {uploadMode === 'image'
+              ? 'Envie JPG, PNG ou outra imagem para criar uma pagina.'
+              : 'Envie um PDF e cada pagina sera convertida em imagem e adicionada ao catalogo.'}
+          </p>
+          {uploadMode === 'pdf' && file && pdfPageCount !== null && (
+            <p className="text-sm text-blue-700">
+              O PDF selecionado tem {pdfPageCount} {pdfPageCount === 1 ? 'pagina' : 'paginas'}.
+            </p>
+          )}
           <button
             onClick={() => void uploadPage()}
             disabled={loading || !file || !selectedCatalog}
             className="px-4 py-2 bg-green-500 text-white rounded disabled:opacity-50"
           >
-            {loading ? 'Enviando...' : 'Enviar Pagina'}
+            {loading
+              ? uploadMode === 'pdf'
+                ? 'Processando PDF...'
+                : 'Enviando...'
+              : uploadMode === 'pdf'
+                ? 'Enviar PDF'
+                : 'Enviar Pagina'}
           </button>
         </div>
       </div>

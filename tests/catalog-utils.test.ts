@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildEditorStateFilePath,
   buildStorageFileName,
   createCatalogSlug,
   extractPricePayload,
@@ -10,12 +11,23 @@ import {
 } from '../src/lib/catalog-utils'
 
 test('createCatalogSlug normalizes spaces, accents and punctuation', () => {
-  assert.equal(createCatalogSlug('  Catálogo Premium 2026  '), 'catalogo-premium-2026')
+  assert.equal(createCatalogSlug('  Cat\u00E1logo Premium 2026  '), 'catalogo-premium-2026')
   assert.equal(createCatalogSlug('Mesa & Banho'), 'mesa-banho')
 })
 
 test('buildStorageFileName preserves timestamp and sanitizes spaces', () => {
   assert.equal(buildStorageFileName('foto de capa.png', 12345), '12345_foto_de_capa.png')
+})
+
+test('buildStorageFileName removes accents and combining marks from invalid storage keys', () => {
+  assert.equal(
+    buildStorageFileName(`CATA${'\u0301'}LOGO especial.jpg`, 12345),
+    '12345_CATALOGO_especial.jpg'
+  )
+})
+
+test('buildEditorStateFilePath uses deterministic storage path', () => {
+  assert.equal(buildEditorStateFilePath('page-123'), 'editor-state/page-123.json')
 })
 
 test('filterPagesByCatalog returns only matching pages', () => {

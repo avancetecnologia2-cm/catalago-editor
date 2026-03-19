@@ -23,8 +23,28 @@ export function createCatalogSlug(name: string) {
 }
 
 export function buildStorageFileName(fileName: string, timestamp: number) {
-  const sanitizedFileName = fileName.trim().replace(/\s+/g, '_')
-  return `${timestamp}_${sanitizedFileName}`
+  const trimmedFileName = fileName.trim()
+  const extensionIndex = trimmedFileName.lastIndexOf('.')
+  const hasExtension = extensionIndex > 0 && extensionIndex < trimmedFileName.length - 1
+  const baseName = hasExtension ? trimmedFileName.slice(0, extensionIndex) : trimmedFileName
+  const extension = hasExtension ? trimmedFileName.slice(extensionIndex + 1).toLowerCase() : ''
+
+  const normalizedBaseName = baseName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+  const fallbackBaseName = normalizedBaseName || 'arquivo'
+  return extension
+    ? `${timestamp}_${fallbackBaseName}.${extension}`
+    : `${timestamp}_${fallbackBaseName}`
+}
+
+export function buildEditorStateFilePath(pageId: string) {
+  return `editor-state/${pageId}.json`
 }
 
 export function filterPagesByCatalog<T extends { catalog_id: string }>(
