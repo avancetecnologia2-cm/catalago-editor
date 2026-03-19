@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import Editor from '@/components/Editor'
 import { supabase } from '@/lib/supabase'
 import {
   buildStorageFileName,
@@ -34,6 +35,7 @@ export default function Dashboard() {
   const [file, setFile] = useState<File | null>(null)
   const [uploadMode, setUploadMode] = useState<'image' | 'pdf'>('image')
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null)
+  const [editingPageId, setEditingPageId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [creatingCatalog, setCreatingCatalog] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -221,7 +223,7 @@ export default function Dashboard() {
       <header className="space-y-2">
         <h1 className="text-3xl font-bold">Editor de Catalogo</h1>
         <p className="text-sm text-gray-600">
-          Crie catalogos, envie paginas e abra o editor para posicionar precos sobre a arte.
+          Crie catalogos, envie paginas e ajuste os elementos direto no dashboard ou na tela de edicao.
         </p>
       </header>
 
@@ -367,24 +369,61 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-3 flex-wrap">
                 {getCatalogPages(catalog.id).length === 0 && (
                   <p className="text-sm text-gray-500">Nenhuma pagina enviada ainda.</p>
                 )}
 
                 {getCatalogPages(catalog.id).map((page) => (
-                  <div key={page.id} className="relative">
+                  <div key={page.id} className="w-32 rounded-lg border border-zinc-200 p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={page.image_url} alt="" className="w-24 h-24 object-cover rounded" />
-                    <Link
-                      href={`/edit/${page.id}`}
-                      className="absolute bottom-0 right-0 px-2 py-1 bg-yellow-500 text-white text-xs rounded"
-                    >
-                      Editar
-                    </Link>
+                    <img src={page.image_url} alt="" className="h-24 w-full rounded object-cover" />
+                    <div className="mt-2 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingPageId((current) => (current === page.id ? null : page.id))
+                        }
+                        className={`w-full rounded px-2 py-1 text-xs font-medium ${
+                          editingPageId === page.id
+                            ? 'bg-zinc-800 text-white hover:bg-zinc-900'
+                            : 'bg-yellow-500 text-white hover:bg-yellow-600'
+                        }`}
+                      >
+                        {editingPageId === page.id ? 'Fechar editor' : 'Editar aqui'}
+                      </button>
+                      <Link
+                        href={`/edit/${page.id}`}
+                        className="block w-full rounded bg-blue-100 px-2 py-1 text-center text-xs font-medium text-blue-700 hover:bg-blue-200"
+                      >
+                        Tela cheia
+                      </Link>
+                    </div>
                   </div>
                 ))}
               </div>
+
+              {editingPageId &&
+                getCatalogPages(catalog.id).some((page) => page.id === editingPageId) && (
+                  <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-semibold text-zinc-900">Edicao inline da pagina</h4>
+                        <p className="text-sm text-zinc-600">
+                          Posicione textos, formas e estilos sem sair do dashboard.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingPageId(null)}
+                        className="rounded bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200 hover:bg-zinc-50"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                    <Editor params={{ id: editingPageId }} />
+                  </div>
+                )}
             </div>
           ))}
       </div>
