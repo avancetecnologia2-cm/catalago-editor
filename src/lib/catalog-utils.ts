@@ -60,7 +60,10 @@ export function extractPricePayload(
 ): PriceInsertPayload[] {
   return objects
     .filter((object) =>
-      object.type === 'Textbox' || object.type === 'text' || object.type === 'i-text'
+      object.type === 'Textbox' ||
+      object.type === 'textbox' ||
+      object.type === 'text' ||
+      object.type === 'i-text'
     )
     .map((object) => ({
       page_id: pageId,

@@ -46,6 +46,7 @@ test('filterPagesByCatalog returns only matching pages', () => {
 test('extractPricePayload keeps only text objects with content', () => {
   const payload = extractPricePayload('page-1', [
     { type: 'Textbox', text: ' R$ 9,99 ', left: 12, top: 16 },
+    { type: 'textbox', text: 'R$ 89,00', left: 20, top: 24 },
     { type: 'rect', text: 'ignorar', left: 0, top: 0 },
     { type: 'i-text', text: '   ', left: 2, top: 3 },
     { type: 'text', text: 'R$ 19,99', left: undefined, top: undefined },
@@ -53,6 +54,7 @@ test('extractPricePayload keeps only text objects with content', () => {
 
   assert.deepEqual(payload, [
     { page_id: 'page-1', text: 'R$ 9,99', x: 12, y: 16 },
+    { page_id: 'page-1', text: 'R$ 89,00', x: 20, y: 24 },
     { page_id: 'page-1', text: 'R$ 19,99', x: 0, y: 0 },
   ])
 })
