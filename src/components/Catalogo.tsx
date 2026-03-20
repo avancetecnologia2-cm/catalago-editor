@@ -54,26 +54,30 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
     renderedHeight: 600,
   })
 
+  const loadState = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/editor-state/${page.id}`, {
+        cache: 'no-store',
+      })
+
+      if (!response.ok) {
+        setStateObjects(null)
+        return
+      }
+
+      const data = (await response.json()) as StoredCanvasState
+      setStateObjects(Array.isArray(data.objects) ? data.objects : [])
+    } catch {
+      setStateObjects(null)
+    }
+  }, [page.id])
+
   useEffect(() => {
     let isActive = true
 
-    const loadState = async () => {
+    const safeLoadState = async () => {
       try {
-        const response = await fetch(`/api/editor-state/${page.id}`, {
-          cache: 'no-store',
-        })
-
-        if (!response.ok) {
-          if (isActive) {
-            setStateObjects(null)
-          }
-          return
-        }
-
-        const data = (await response.json()) as StoredCanvasState
-        if (isActive) {
-          setStateObjects(Array.isArray(data.objects) ? data.objects : [])
-        }
+        await loadState()
       } catch {
         if (isActive) {
           setStateObjects(null)
@@ -81,12 +85,28 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
       }
     }
 
-    void loadState()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void safeLoadState()
+      }
+    }
+
+    const handlePageShow = () => {
+      void safeLoadState()
+    }
+
+    void safeLoadState()
+    window.addEventListener('focus', handlePageShow)
+    window.addEventListener('pageshow', handlePageShow)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       isActive = false
+      window.removeEventListener('focus', handlePageShow)
+      window.removeEventListener('pageshow', handlePageShow)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [page.id])
+  }, [loadState])
 
   useEffect(() => {
     const imageElement = imageRef.current
