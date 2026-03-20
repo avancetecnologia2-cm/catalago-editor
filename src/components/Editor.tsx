@@ -41,6 +41,31 @@ function clampFontSize(value: number) {
   return Math.min(Math.max(value, 10), 96)
 }
 
+function getPointerClientPosition(event: TPointerEvent) {
+  if ('clientX' in event && 'clientY' in event) {
+    return {
+      x: event.clientX,
+      y: event.clientY,
+    }
+  }
+
+  if ('touches' in event && event.touches.length > 0) {
+    return {
+      x: event.touches[0].clientX,
+      y: event.touches[0].clientY,
+    }
+  }
+
+  if ('changedTouches' in event && event.changedTouches.length > 0) {
+    return {
+      x: event.changedTouches[0].clientX,
+      y: event.changedTouches[0].clientY,
+    }
+  }
+
+  return null
+}
+
 export default function Editor({ params }: EditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -181,23 +206,27 @@ export default function Editor({ params }: EditorProps) {
           return
         }
 
-        isPanningRef.current = true
-        lastPointerRef.current = {
-          x: event.e.clientX,
-          y: event.e.clientY,
+        const pointerPosition = getPointerClientPosition(event.e)
+        if (!pointerPosition) {
+          return
         }
+
+        isPanningRef.current = true
+        lastPointerRef.current = pointerPosition
       })
       canvas.on('mouse:move', (event: TPointerEventInfo<TPointerEvent>) => {
         if (!isPanningRef.current) {
           return
         }
 
-        const deltaX = event.e.clientX - lastPointerRef.current.x
-        const deltaY = event.e.clientY - lastPointerRef.current.y
-        lastPointerRef.current = {
-          x: event.e.clientX,
-          y: event.e.clientY,
+        const pointerPosition = getPointerClientPosition(event.e)
+        if (!pointerPosition) {
+          return
         }
+
+        const deltaX = pointerPosition.x - lastPointerRef.current.x
+        const deltaY = pointerPosition.y - lastPointerRef.current.y
+        lastPointerRef.current = pointerPosition
 
         panRef.current = {
           x: panRef.current.x + deltaX,
