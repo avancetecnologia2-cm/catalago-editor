@@ -36,6 +36,27 @@ interface StoredCanvasState {
   objects?: unknown[]
 }
 
+interface SavedCanvasObject {
+  type?: string
+  left?: number
+  top?: number
+  width?: number
+  height?: number
+  radius?: number
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+  text?: string
+  fontSize?: number
+  fontWeight?: string
+  scaleX?: number
+  scaleY?: number
+  x1?: number
+  y1?: number
+  x2?: number
+  y2?: number
+}
+
 interface CatalogPageArtworkProps {
   page: Page
   pageLabel: string
@@ -45,7 +66,6 @@ interface CatalogPageArtworkProps {
 
 function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageArtworkProps) {
   const imageRef = useRef<HTMLImageElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [stateObjects, setStateObjects] = useState<unknown[] | null>(null)
   const [size, setSize] = useState({
     naturalWidth: 800,
@@ -136,44 +156,9 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
     }
   }, [showImage, page.image_url])
 
-  useEffect(() => {
-    let mounted = true
-    let staticCanvas: { dispose?: () => void } | null = null
-
-    const renderState = async () => {
-      if (!canvasRef.current || !stateObjects || stateObjects.length === 0) {
-        return
-      }
-
-      const { StaticCanvas } = await import('fabric')
-      if (!mounted || !canvasRef.current) {
-        return
-      }
-
-      staticCanvas = new StaticCanvas(canvasRef.current, {
-        width: size.naturalWidth,
-        height: size.naturalHeight,
-        backgroundColor: 'transparent',
-      })
-
-      const canvasWithLoader = staticCanvas as typeof staticCanvas & {
-        loadFromJSON: (json: unknown) => Promise<unknown>
-        requestRenderAll: () => void
-      }
-
-      await canvasWithLoader.loadFromJSON({ objects: stateObjects })
-      canvasWithLoader.requestRenderAll()
-    }
-
-    void renderState()
-
-    return () => {
-      mounted = false
-      staticCanvas?.dispose?.()
-    }
-  }, [size.naturalHeight, size.naturalWidth, stateObjects])
-
   const hasSavedState = !!stateObjects && stateObjects.length > 0
+  const scaleX = size.renderedWidth / size.naturalWidth
+  const scaleY = size.renderedHeight / size.naturalHeight
 
   return (
     <div
@@ -194,14 +179,108 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
       />
 
       {hasSavedState ? (
-        <canvas
-          ref={canvasRef}
+        <div
           className="absolute inset-0 pointer-events-none"
           style={{
             width: size.renderedWidth,
             height: size.renderedHeight,
           }}
-        />
+        >
+          {(stateObjects as SavedCanvasObject[]).map((object, index) => {
+            const type = object.type || ''
+            const left = (object.left || 0) * scaleX
+            const top = (object.top || 0) * scaleY
+            const width = (object.width || 0) * (object.scaleX || 1) * scaleX
+            const height = (object.height || 0) * (object.scaleY || 1) * scaleY
+            const fill = object.fill || 'transparent'
+            const stroke = object.stroke || fill
+            const strokeWidth = (object.strokeWidth || 1) * ((scaleX + scaleY) / 2)
+
+            if (type === 'textbox' || type === 'i-text' || type === 'text') {
+              return (
+                <div
+                  key={`${type}-${index}`}
+                  className="absolute whitespace-pre-wrap"
+                  style={{
+                    left,
+                    top,
+                    width: Math.max(width, 40),
+                    color: fill,
+                    fontSize: (object.fontSize || 20) * ((scaleX + scaleY) / 2),
+                    fontWeight: object.fontWeight || 'normal',
+                    lineHeight: 1.1,
+                  }}
+                >
+                  {object.text || ''}
+                </div>
+              )
+            }
+
+            if (type === 'rect') {
+              return (
+                <div
+                  key={`${type}-${index}`}
+                  className="absolute"
+                  style={{
+                    left,
+                    top,
+                    width,
+                    height,
+                    backgroundColor: fill,
+                    border: strokeWidth > 0 ? `${strokeWidth}px solid ${stroke}` : 'none',
+                    borderRadius: 8,
+                  }}
+                />
+              )
+            }
+
+            if (type === 'circle') {
+              const radius = (object.radius || 0) * (object.scaleX || 1) * scaleX
+              const diameter = radius * 2
+
+              return (
+                <div
+                  key={`${type}-${index}`}
+                  className="absolute rounded-full"
+                  style={{
+                    left,
+                    top,
+                    width: diameter,
+                    height: diameter,
+                    backgroundColor: fill,
+                    border: strokeWidth > 0 ? `${strokeWidth}px solid ${stroke}` : 'none',
+                  }}
+                />
+              )
+            }
+
+            if (type === 'line') {
+              const x1 = (object.x1 || 0) * scaleX
+              const y1 = (object.y1 || 0) * scaleY
+              const x2 = (object.x2 || 0) * scaleX
+              const y2 = (object.y2 || 0) * scaleY
+              const lineWidth = Math.hypot(x2 - x1, y2 - y1)
+              const angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI)
+
+              return (
+                <div
+                  key={`${type}-${index}`}
+                  className="absolute origin-left"
+                  style={{
+                    left: left + x1,
+                    top: top + y1,
+                    width: lineWidth,
+                    height: Math.max(strokeWidth, 2),
+                    backgroundColor: stroke,
+                    transform: `rotate(${angle}deg)`,
+                  }}
+                />
+              )
+            }
+
+            return null
+          })}
+        </div>
       ) : (
         <div
           className="absolute inset-0"
