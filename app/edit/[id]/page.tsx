@@ -10,7 +10,7 @@ export default async function EditPage({ params }: EditPageProps) {
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold mb-4">Editar pagina</h1>
-      <Editor params={{ id }} />
+      <Editor params={{ id }} returnOnSave />
     </div>
   )
 }

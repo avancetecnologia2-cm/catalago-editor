@@ -32,6 +32,192 @@ interface Catalog {
   slug: string
 }
 
+interface StoredCanvasState {
+  objects?: unknown[]
+}
+
+interface CatalogPageArtworkProps {
+  page: Page
+  pageLabel: string
+  showImage: boolean
+  prices: Price[]
+}
+
+function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageArtworkProps) {
+  const imageRef = useRef<HTMLImageElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [stateObjects, setStateObjects] = useState<unknown[] | null>(null)
+  const [size, setSize] = useState({
+    naturalWidth: 800,
+    naturalHeight: 600,
+    renderedWidth: 800,
+    renderedHeight: 600,
+  })
+
+  useEffect(() => {
+    let isActive = true
+
+    const loadState = async () => {
+      try {
+        const response = await fetch(`/api/editor-state/${page.id}`, {
+          cache: 'no-store',
+        })
+
+        if (!response.ok) {
+          if (isActive) {
+            setStateObjects(null)
+          }
+          return
+        }
+
+        const data = (await response.json()) as StoredCanvasState
+        if (isActive) {
+          setStateObjects(Array.isArray(data.objects) ? data.objects : [])
+        }
+      } catch {
+        if (isActive) {
+          setStateObjects(null)
+        }
+      }
+    }
+
+    void loadState()
+
+    return () => {
+      isActive = false
+    }
+  }, [page.id])
+
+  useEffect(() => {
+    const imageElement = imageRef.current
+
+    if (!imageElement) {
+      return
+    }
+
+    const syncSize = () => {
+      setSize({
+        naturalWidth: imageElement.naturalWidth || 800,
+        naturalHeight: imageElement.naturalHeight || 600,
+        renderedWidth: imageElement.clientWidth || imageElement.naturalWidth || 800,
+        renderedHeight: imageElement.clientHeight || imageElement.naturalHeight || 600,
+      })
+    }
+
+    syncSize()
+
+    const observer = new ResizeObserver(() => {
+      syncSize()
+    })
+
+    observer.observe(imageElement)
+    return () => {
+      observer.disconnect()
+    }
+  }, [showImage, page.image_url])
+
+  useEffect(() => {
+    let mounted = true
+    let staticCanvas: { dispose?: () => void } | null = null
+
+    const renderState = async () => {
+      if (!canvasRef.current || !stateObjects || stateObjects.length === 0) {
+        return
+      }
+
+      const { StaticCanvas } = await import('fabric')
+      if (!mounted || !canvasRef.current) {
+        return
+      }
+
+      staticCanvas = new StaticCanvas(canvasRef.current, {
+        width: size.naturalWidth,
+        height: size.naturalHeight,
+        backgroundColor: 'transparent',
+      })
+
+      const canvasWithLoader = staticCanvas as typeof staticCanvas & {
+        loadFromJSON: (json: unknown) => Promise<unknown>
+        requestRenderAll: () => void
+      }
+
+      await canvasWithLoader.loadFromJSON({ objects: stateObjects })
+      canvasWithLoader.requestRenderAll()
+    }
+
+    void renderState()
+
+    return () => {
+      mounted = false
+      staticCanvas?.dispose?.()
+    }
+  }, [size.naturalHeight, size.naturalWidth, stateObjects])
+
+  const hasSavedState = !!stateObjects && stateObjects.length > 0
+
+  return (
+    <div
+      className="relative"
+      style={{
+        width: showImage ? 'fit-content' : `${size.renderedWidth}px`,
+        margin: '0 auto',
+        backgroundColor: showImage ? 'transparent' : '#f3f4f6',
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={imageRef}
+        src={page.image_url}
+        alt={pageLabel}
+        className={`max-w-full block ${showImage ? '' : 'invisible absolute pointer-events-none'}`}
+        crossOrigin="anonymous"
+      />
+
+      {hasSavedState ? (
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            width: size.renderedWidth,
+            height: size.renderedHeight,
+          }}
+        />
+      ) : (
+        <div
+          className="absolute inset-0"
+          style={{
+            width: showImage ? '100%' : `${size.renderedWidth}px`,
+            height: showImage ? '100%' : `${size.renderedHeight}px`,
+            position: showImage ? 'absolute' : 'relative',
+            margin: showImage ? 0 : '0 auto',
+            backgroundColor: showImage ? 'transparent' : '#f3f4f6',
+          }}
+        >
+          {prices.map((price) => (
+            <span
+              key={price.id}
+              className="absolute text-red-600 font-bold text-lg whitespace-nowrap"
+              style={{
+                left: price.x,
+                top: price.y,
+                textShadow: showImage ? '1px 1px 2px white, -1px -1px 2px white' : 'none',
+              }}
+            >
+              {price.text}
+            </span>
+          ))}
+
+          {prices.length === 0 && !showImage && (
+            <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+              <p>Sem precos nesta pagina</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Catalogo({ params }: CatalogoProps) {
   const [pages, setPages] = useState<Page[]>([])
   const [prices, setPrices] = useState<Price[]>([])
@@ -274,56 +460,13 @@ export default function Catalogo({ params }: CatalogoProps) {
                 pageRefs.current[page.id] = element
               }}
               className="relative"
-              style={{
-                width: 'fit-content',
-                margin: '0 auto',
-                backgroundColor: showImage ? 'transparent' : '#f3f4f6',
-              }}
             >
-              {showImage && (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={page.image_url}
-                    alt={`Pagina ${index + 1}`}
-                    className="max-w-full block"
-                    crossOrigin="anonymous"
-                  />
-                </>
-              )}
-
-              <div
-                className="absolute inset-0"
-                style={{
-                  width: showImage ? '100%' : '800px',
-                  height: showImage ? '100%' : '600px',
-                  position: showImage ? 'absolute' : 'relative',
-                  margin: showImage ? 0 : '0 auto',
-                  backgroundColor: showImage ? 'transparent' : '#f3f4f6',
-                }}
-              >
-                {getPagePrices(page.id).map((price) => (
-                  <span
-                    key={price.id}
-                    className="absolute text-red-600 font-bold text-lg whitespace-nowrap"
-                    style={{
-                      left: price.x,
-                      top: price.y,
-                      textShadow: showImage
-                        ? '1px 1px 2px white, -1px -1px 2px white'
-                        : 'none',
-                    }}
-                  >
-                    {price.text}
-                  </span>
-                ))}
-
-                {getPagePrices(page.id).length === 0 && !showImage && (
-                  <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                    <p>Sem precos nesta pagina</p>
-                  </div>
-                )}
-              </div>
+              <CatalogPageArtwork
+                page={page}
+                pageLabel={`Pagina ${index + 1}`}
+                showImage={showImage}
+                prices={getPagePrices(page.id)}
+              />
             </div>
           </div>
         ))}

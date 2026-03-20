@@ -16,6 +16,7 @@ interface EditorProps {
   params: {
     id: string
   }
+  returnOnSave?: boolean
 }
 
 interface PageRecord {
@@ -66,7 +67,7 @@ function getPointerClientPosition(event: TPointerEvent) {
   return null
 }
 
-export default function Editor({ params }: EditorProps) {
+export default function Editor({ params, returnOnSave = false }: EditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const fabricRef = useRef<FabricCanvas | null>(null)
@@ -82,6 +83,16 @@ export default function Editor({ params }: EditorProps) {
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
   const [fontWeight, setFontWeight] = useState<'normal' | 'bold'>('normal')
   const [zoomPercent, setZoomPercent] = useState(100)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
+
+  const leaveEditor = useCallback(() => {
+    if (window.history.length > 1) {
+      window.history.back()
+      return
+    }
+
+    window.location.assign('/')
+  }, [])
 
   const applyViewport = useCallback(() => {
     const canvas = fabricRef.current
@@ -624,8 +635,19 @@ export default function Editor({ params }: EditorProps) {
     }
 
     setSaving(false)
-    alert('Edicao completa salva! Agora textos, formas e estilos voltam ao reabrir a pagina.')
-  }, [params.id])
+    setSaveNotice('Salvo!')
+
+    if (returnOnSave) {
+      window.setTimeout(() => {
+        leaveEditor()
+      }, 800)
+      return
+    }
+
+    window.setTimeout(() => {
+      setSaveNotice(null)
+    }, 1200)
+  }, [leaveEditor, params.id, returnOnSave])
 
   return (
     <div className="space-y-4">
@@ -633,14 +655,7 @@ export default function Editor({ params }: EditorProps) {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => {
-              if (window.history.length > 1) {
-                window.history.back()
-                return
-              }
-
-              window.location.assign('/')
-            }}
+            onClick={leaveEditor}
             className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded hover:bg-zinc-50"
           >
             Cancelar edicao
@@ -801,6 +816,12 @@ export default function Editor({ params }: EditorProps) {
         do canvas e tambem mantem a tabela de precos atualizada. Arraste o fundo para mover a
         imagem e use a roda do mouse ou os botoes para ampliar e reduzir.
       </p>
+
+      {saveNotice && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+          {saveNotice}
+        </div>
+      )}
 
       {loading && <p className="text-sm text-gray-500">Carregando pagina...</p>}
 
