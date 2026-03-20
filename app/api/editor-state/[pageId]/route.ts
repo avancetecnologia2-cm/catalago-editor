@@ -13,7 +13,8 @@ export async function GET(
     return Response.json({ objects: [] }, { status: 404 })
   }
 
-  const payload = (await data.json().catch(async () => JSON.parse(await data.text()))) as unknown
+  const text = await data.text()
+  const payload = JSON.parse(text) as unknown
 
   return Response.json(payload, {
     status: 200,
