@@ -593,60 +593,62 @@ export default function Editor({ params, returnOnSave = false }: EditorProps) {
     if (!fabricRef.current) return
 
     setSaving(true)
+    try {
+      const canvas = fabricRef.current
+      const payload = extractPricePayload(params.id, canvas.getObjects())
 
-    const canvas = fabricRef.current
-    const payload = extractPricePayload(params.id, canvas.getObjects())
-
-    const { error: deleteError } = await supabase.from('prices').delete().eq('page_id', params.id)
-    if (deleteError) {
-      setSaving(false)
-      alert('Erro ao limpar precos: ' + deleteError.message)
-      return
-    }
-
-    if (payload.length > 0) {
-      const { error: insertError } = await supabase.from('prices').insert(payload)
-      if (insertError) {
-        setSaving(false)
-        alert('Erro ao salvar precos: ' + insertError.message)
+      const { error: deleteError } = await supabase.from('prices').delete().eq('page_id', params.id)
+      if (deleteError) {
+        alert('Erro ao limpar precos: ' + deleteError.message)
         return
       }
-    }
 
-    const serializedCanvas = canvas.toJSON()
-    const storedState: StoredCanvasState = {
-      objects: Array.isArray(serializedCanvas.objects) ? serializedCanvas.objects : [],
-    }
+      if (payload.length > 0) {
+        const { error: insertError } = await supabase.from('prices').insert(payload)
+        if (insertError) {
+          alert('Erro ao salvar precos: ' + insertError.message)
+          return
+        }
+      }
 
-    const response = await fetch(`/api/editor-state/${params.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(storedState),
-    })
+      const serializedCanvas = canvas.toJSON()
+      const storedState: StoredCanvasState = {
+        objects: Array.isArray(serializedCanvas.objects) ? serializedCanvas.objects : [],
+      }
 
-    if (!response.ok) {
-      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-      const message = errorPayload?.error || 'Falha ao salvar layout completo'
-      setSaving(false)
-      alert('Os precos foram salvos, mas falhou ao salvar o layout completo: ' + message)
-      return
-    }
+      const response = await fetch(`/api/editor-state/${params.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(storedState),
+      })
 
-    setSaving(false)
-    setSaveNotice('Salvo!')
+      if (!response.ok) {
+        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
+        const message = errorPayload?.error || 'Falha ao salvar layout completo'
+        alert('Os precos foram salvos, mas falhou ao salvar o layout completo: ' + message)
+        return
+      }
 
-    if (returnOnSave) {
+      setSaveNotice('Salvo!')
+
+      if (returnOnSave) {
+        window.setTimeout(() => {
+          leaveEditor()
+        }, 800)
+        return
+      }
+
       window.setTimeout(() => {
-        leaveEditor()
-      }, 800)
-      return
+        setSaveNotice(null)
+      }, 1200)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha inesperada ao salvar'
+      alert('Erro ao salvar edicao: ' + message)
+    } finally {
+      setSaving(false)
     }
-
-    window.setTimeout(() => {
-      setSaveNotice(null)
-    }, 1200)
   }, [leaveEditor, params.id, returnOnSave])
 
   return (

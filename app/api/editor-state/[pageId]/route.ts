@@ -13,12 +13,11 @@ export async function GET(
     return Response.json({ objects: [] }, { status: 404 })
   }
 
-  const text = await data.text()
+  const payload = (await data.json().catch(async () => JSON.parse(await data.text()))) as unknown
 
-  return new Response(text, {
+  return Response.json(payload, {
     status: 200,
     headers: {
-      'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
     },
   })
@@ -29,10 +28,13 @@ export async function PUT(
   context: RouteContext<'/api/editor-state/[pageId]'>
 ) {
   const { pageId } = await context.params
-  const payload = await request.text()
+  const payload = await request.json()
   const statePath = buildEditorStateFilePath(pageId)
+  const stateBlob = new Blob([JSON.stringify(payload)], {
+    type: 'application/json',
+  })
 
-  const { error } = await supabaseServer.storage.from('catalogos').upload(statePath, payload, {
+  const { error } = await supabaseServer.storage.from('catalogos').upload(statePath, stateBlob, {
     upsert: true,
     contentType: 'application/json',
   })
