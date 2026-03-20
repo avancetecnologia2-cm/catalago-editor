@@ -369,6 +369,28 @@ export default function Catalogo({ params }: CatalogoProps) {
     void loadData()
   }, [loadData])
 
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void loadData()
+      }
+    }
+
+    const handleFocus = () => {
+      void loadData()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('pageshow', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('pageshow', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [loadData])
+
   const getPagePrices = (pageId: string) => prices.filter((price) => price.page_id === pageId)
 
   const exportPageAsPNG = async (page: Page) => {

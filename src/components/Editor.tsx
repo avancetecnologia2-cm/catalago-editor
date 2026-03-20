@@ -616,22 +616,23 @@ export default function Editor({ params, returnOnSave = false }: EditorProps) {
         objects: Array.isArray(serializedCanvas.objects) ? serializedCanvas.objects : [],
       }
 
-      const response = await fetch(`/api/editor-state/${params.id}`, {
+      setSaveNotice('Salvo!')
+
+      void fetch(`/api/editor-state/${params.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(storedState),
+      }).then(async (response) => {
+        if (!response.ok) {
+          const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
+          const message = errorPayload?.error || 'Falha ao salvar layout completo'
+          console.warn('Falha ao salvar layout completo:', message)
+        }
+      }).catch((error) => {
+        console.warn('Falha ao salvar layout completo:', error)
       })
-
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-        const message = errorPayload?.error || 'Falha ao salvar layout completo'
-        alert('Os precos foram salvos, mas falhou ao salvar o layout completo: ' + message)
-        return
-      }
-
-      setSaveNotice('Salvo!')
 
       if (returnOnSave) {
         window.setTimeout(() => {
