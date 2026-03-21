@@ -47,6 +47,10 @@ export function buildEditorStateFilePath(pageId: string) {
   return `editor-state/${pageId}.json`
 }
 
+export function buildEditorRenderFilePath(pageId: string) {
+  return `editor-renders/${pageId}.png`
+}
+
 export function filterPagesByCatalog<T extends { catalog_id: string }>(
   pages: T[],
   catalogId: string

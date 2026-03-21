@@ -19,6 +19,18 @@ interface EditorProps {
   returnOnSave?: boolean
 }
 
+interface EditorStateSavedDetail {
+  pageId: string
+  objects: unknown[]
+  prices: Array<{
+    page_id: string
+    text: string
+    x: number
+    y: number
+  }>
+  renderVersion: number
+}
+
 interface PageRecord {
   image_url: string
 }
@@ -615,6 +627,61 @@ export default function Editor({ params, returnOnSave = false }: EditorProps) {
       const storedState: StoredCanvasState = {
         objects: Array.isArray(serializedCanvas.objects) ? serializedCanvas.objects : [],
       }
+      const renderVersion = Date.now()
+      const sceneWidth = sceneSizeRef.current.width
+      const sceneHeight = sceneSizeRef.current.height
+      const originalWidth = canvas.getWidth()
+      const originalHeight = canvas.getHeight()
+      const originalViewport = canvas.viewportTransform
+        ? [...canvas.viewportTransform]
+        : [1, 0, 0, 1, 0, 0]
+
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0])
+      canvas.setDimensions({
+        width: sceneWidth,
+        height: sceneHeight,
+      })
+      canvas.requestRenderAll()
+
+      const renderedImageDataUrl = canvas.toDataURL({
+        format: 'png',
+        multiplier: 1,
+      })
+
+      canvas.setDimensions({
+        width: originalWidth,
+        height: originalHeight,
+      })
+      canvas.setViewportTransform(originalViewport)
+      canvas.requestRenderAll()
+
+      const renderResponse = await fetch(`/api/editor-render/${params.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'image/png',
+        },
+        body: await (await fetch(renderedImageDataUrl)).arrayBuffer(),
+      })
+
+      if (!renderResponse.ok) {
+        const errorPayload = (await renderResponse.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        const message = errorPayload?.error || 'Falha ao salvar imagem final da pagina'
+        alert(message)
+        return
+      }
+
+      window.dispatchEvent(
+        new CustomEvent<EditorStateSavedDetail>('editor-state-saved', {
+          detail: {
+            pageId: params.id,
+            objects: storedState.objects || [],
+            prices: payload,
+            renderVersion,
+          },
+        })
+      )
 
       setSaveNotice('Salvo!')
 

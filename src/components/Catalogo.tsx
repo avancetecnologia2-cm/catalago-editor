@@ -5,7 +5,7 @@ import Link from 'next/link'
 import html2canvas from 'html2canvas'
 import Editor from '@/components/Editor'
 import { supabase } from '@/lib/supabase'
-import { getPdfImagePlacement } from '@/lib/catalog-utils'
+import { buildEditorRenderFilePath, getPdfImagePlacement } from '@/lib/catalog-utils'
 
 interface CatalogoProps {
   params: {
@@ -40,6 +40,8 @@ interface SavedCanvasObject {
   type?: string
   left?: number
   top?: number
+  originX?: string
+  originY?: string
   width?: number
   height?: number
   radius?: number
@@ -57,16 +59,59 @@ interface SavedCanvasObject {
   y2?: number
 }
 
+function getObjectAnchorPosition(
+  object: SavedCanvasObject,
+  renderedWidth: number,
+  renderedHeight: number
+) {
+  const scaleX = renderedWidth
+  const scaleY = renderedHeight
+  const width = (object.width || 0) * (object.scaleX || 1) * scaleX
+  const height = (object.height || 0) * (object.scaleY || 1) * scaleY
+  const rawLeft = (object.left || 0) * scaleX
+  const rawTop = (object.top || 0) * scaleY
+  const originX = object.originX || 'left'
+  const originY = object.originY || 'top'
+
+  const left =
+    originX === 'center' ? rawLeft - width / 2 : originX === 'right' ? rawLeft - width : rawLeft
+  const top =
+    originY === 'center' ? rawTop - height / 2 : originY === 'bottom' ? rawTop - height : rawTop
+
+  return {
+    left,
+    top,
+    width,
+    height,
+  }
+}
+
 interface CatalogPageArtworkProps {
   page: Page
   pageLabel: string
   showImage: boolean
   prices: Price[]
+  overrideStateObjects?: unknown[] | null
+  renderVersion?: number
 }
 
-function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageArtworkProps) {
+function getRenderedPageImageUrl(pageId: string, renderVersion?: number) {
+  const { data } = supabase.storage.from('catalogos').getPublicUrl(buildEditorRenderFilePath(pageId))
+  const cacheVersion = renderVersion ?? Date.now()
+  return `${data.publicUrl}?v=${cacheVersion}`
+}
+
+function CatalogPageArtwork({
+  page,
+  pageLabel,
+  showImage,
+  prices,
+  overrideStateObjects = null,
+  renderVersion,
+}: CatalogPageArtworkProps) {
   const imageRef = useRef<HTMLImageElement | null>(null)
   const [stateObjects, setStateObjects] = useState<unknown[] | null>(null)
+  const [failedImageKey, setFailedImageKey] = useState<string | null>(null)
   const [size, setSize] = useState({
     naturalWidth: 800,
     naturalHeight: 600,
@@ -154,9 +199,16 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
     return () => {
       observer.disconnect()
     }
-  }, [showImage, page.image_url])
+  }, [displayImageUrl, showImage, page.image_url])
 
-  const hasSavedState = !!stateObjects && stateObjects.length > 0
+  const effectiveStateObjects = overrideStateObjects ?? stateObjects
+  const hasSavedState = !!effectiveStateObjects && effectiveStateObjects.length > 0
+  const imageKey = `${page.id}-${renderVersion ?? 'base'}`
+  const renderedImageUrl = getRenderedPageImageUrl(page.id, renderVersion)
+  const usingRenderedImage = failedImageKey !== imageKey
+  const displayImageUrl = usingRenderedImage ? renderedImageUrl : page.image_url
+  const shouldRenderSavedOverlay = (!showImage || !usingRenderedImage) && hasSavedState
+  const shouldRenderPriceOverlay = (!showImage || !usingRenderedImage) && !hasSavedState
   const scaleX = size.renderedWidth / size.naturalWidth
   const scaleY = size.renderedHeight / size.naturalHeight
 
@@ -172,13 +224,18 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imageRef}
-        src={page.image_url}
+        src={displayImageUrl}
         alt={pageLabel}
         className={`max-w-full block ${showImage ? '' : 'invisible absolute pointer-events-none'}`}
         crossOrigin="anonymous"
+        onError={() => {
+          if (failedImageKey !== imageKey) {
+            setFailedImageKey(imageKey)
+          }
+        }}
       />
 
-      {hasSavedState ? (
+      {shouldRenderSavedOverlay ? (
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -186,12 +243,9 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
             height: size.renderedHeight,
           }}
         >
-          {(stateObjects as SavedCanvasObject[]).map((object, index) => {
-            const type = object.type || ''
-            const left = (object.left || 0) * scaleX
-            const top = (object.top || 0) * scaleY
-            const width = (object.width || 0) * (object.scaleX || 1) * scaleX
-            const height = (object.height || 0) * (object.scaleY || 1) * scaleY
+          {(effectiveStateObjects as SavedCanvasObject[]).map((object, index) => {
+            const type = (object.type || '').toLowerCase()
+            const { left, top, width, height } = getObjectAnchorPosition(object, scaleX, scaleY)
             const fill = object.fill || 'transparent'
             const stroke = object.stroke || fill
             const strokeWidth = (object.strokeWidth || 1) * ((scaleX + scaleY) / 2)
@@ -237,14 +291,18 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
             if (type === 'circle') {
               const radius = (object.radius || 0) * (object.scaleX || 1) * scaleX
               const diameter = radius * 2
+              const circleLeft =
+                object.originX === 'center' ? (object.left || 0) * scaleX - radius : left
+              const circleTop =
+                object.originY === 'center' ? (object.top || 0) * scaleY - radius : top
 
               return (
                 <div
                   key={`${type}-${index}`}
                   className="absolute rounded-full"
                   style={{
-                    left,
-                    top,
+                    left: circleLeft,
+                    top: circleTop,
                     width: diameter,
                     height: diameter,
                     backgroundColor: fill,
@@ -281,7 +339,7 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
             return null
           })}
         </div>
-      ) : (
+      ) : shouldRenderPriceOverlay ? (
         <div
           className="absolute inset-0"
           style={{
@@ -312,7 +370,7 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -320,6 +378,8 @@ function CatalogPageArtwork({ page, pageLabel, showImage, prices }: CatalogPageA
 export default function Catalogo({ params }: CatalogoProps) {
   const [pages, setPages] = useState<Page[]>([])
   const [prices, setPrices] = useState<Price[]>([])
+  const [savedStateOverrides, setSavedStateOverrides] = useState<Record<string, unknown[]>>({})
+  const [renderVersions, setRenderVersions] = useState<Record<string, number>>({})
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [loading, setLoading] = useState(true)
   const [showImage, setShowImage] = useState(true)
@@ -368,6 +428,57 @@ export default function Catalogo({ params }: CatalogoProps) {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  useEffect(() => {
+    const handleEditorStateSaved = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        pageId: string
+        objects?: unknown[]
+        prices?: Array<{
+          page_id: string
+          text: string
+          x: number
+          y: number
+        }>
+        renderVersion?: number
+      }>
+      const pageId = customEvent.detail?.pageId
+
+      if (!pageId) {
+        return
+      }
+
+      setSavedStateOverrides((current) => ({
+        ...current,
+        [pageId]: Array.isArray(customEvent.detail.objects) ? customEvent.detail.objects : [],
+      }))
+
+      if (typeof customEvent.detail.renderVersion === 'number') {
+        setRenderVersions((current) => ({
+          ...current,
+          [pageId]: customEvent.detail.renderVersion as number,
+        }))
+      }
+
+      if (Array.isArray(customEvent.detail.prices)) {
+        setPrices((current) => {
+          const otherPrices = current.filter((price) => price.page_id !== pageId)
+          const nextPrices = customEvent.detail.prices.map((price, index) => ({
+            id: `local-${pageId}-${index}`,
+            ...price,
+          }))
+
+          return [...otherPrices, ...nextPrices]
+        })
+      }
+    }
+
+    window.addEventListener('editor-state-saved', handleEditorStateSaved as EventListener)
+
+    return () => {
+      window.removeEventListener('editor-state-saved', handleEditorStateSaved as EventListener)
+    }
+  }, [])
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -587,6 +698,8 @@ export default function Catalogo({ params }: CatalogoProps) {
                 pageLabel={`Pagina ${index + 1}`}
                 showImage={showImage}
                 prices={getPagePrices(page.id)}
+                overrideStateObjects={savedStateOverrides[page.id] ?? null}
+                renderVersion={renderVersions[page.id]}
               />
             </div>
           </div>

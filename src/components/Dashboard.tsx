@@ -5,6 +5,7 @@ import Link from 'next/link'
 import Editor from '@/components/Editor'
 import { supabase } from '@/lib/supabase'
 import {
+  buildEditorRenderFilePath,
   buildStorageFileName,
   createCatalogSlug,
   filterPagesByCatalog,
@@ -25,6 +26,32 @@ interface Page {
   id: string
   catalog_id: string
   image_url: string
+}
+
+function getRenderedPageImageUrl(pageId: string) {
+  const { data } = supabase.storage.from('catalogos').getPublicUrl(buildEditorRenderFilePath(pageId))
+  return `${data.publicUrl}?v=${Date.now()}`
+}
+
+function PageThumbnail({ page }: { page: Page }) {
+  const [failedImageKey, setFailedImageKey] = useState<string | null>(null)
+  const imageKey = page.id
+  const renderedThumbnailUrl = getRenderedPageImageUrl(page.id)
+  const thumbnailUrl = failedImageKey === imageKey ? page.image_url : renderedThumbnailUrl
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={thumbnailUrl}
+      alt=""
+      className="h-24 w-full rounded object-cover"
+      onError={() => {
+        if (failedImageKey !== imageKey) {
+          setFailedImageKey(imageKey)
+        }
+      }}
+    />
+  )
 }
 
 export default function Dashboard() {
@@ -376,8 +403,7 @@ export default function Dashboard() {
 
                 {getCatalogPages(catalog.id).map((page) => (
                   <div key={page.id} className="w-32 rounded-lg border border-zinc-200 p-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={page.image_url} alt="" className="h-24 w-full rounded object-cover" />
+                    <PageThumbnail page={page} />
                     <div className="mt-2 space-y-2">
                       <button
                         type="button"
